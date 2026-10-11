@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Receipt Parser</title>
+<style>
+  :root { --bg:#f7f7f5; --card:#fff; --fg:#1d1d1b; --muted:#6b6b66; --line:#e3e3de; --ok:#1f7a4d; --bad:#b3261e; --accent:#2f5bd3; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#151514; --card:#1f1f1d; --fg:#ececea; --muted:#9a9a94; --line:#33332f; --ok:#5cc28d; --bad:#ff8a80; --accent:#8aa8ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, "Hiragino Sans", sans-serif; }
+  main { max-width:1100px; margin:0 auto; padding:24px 16px; }
+  h1 { font-size:20px; margin:0 0 16px; }
+  h2 { font-size:15px; margin:0 0 10px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.3fr); gap:16px; margin-top:16px; }
+  @media (max-width:800px) { .grid { grid-template-columns:1fr; } }
+  #drop { border:2px dashed var(--line); border-radius:10px; padding:28px; text-align:center; cursor:pointer; color:var(--muted); }
+  #drop.over { border-color:var(--accent); color:var(--fg); }
+  .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+  input[type=number] { width:140px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
+  button { padding:8px 16px; border:0; border-radius:6px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  #preview { max-width:100%; border-radius:6px; display:none; }
+  .score { font-size:40px; font-weight:700; line-height:1; }
+  .muted { color:var(--muted); font-size:13px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  td, th { text-align:left; padding:6px 4px; border-bottom:1px solid var(--line); vertical-align:top; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  ul { margin:0; padding-left:20px; }
+  pre { background:var(--bg); padding:10px; border-radius:6px; overflow:auto; font-size:12px; margin:0; }
+  section + section { margin-top:16px; }
+  #error { color:var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Japanese Receipt Parser</h1>
+  <div class="card">
+    <div id="drop">Drop a receipt image here, or click to choose one.</div>
+    <input id="file" type="file" accept="image/*" hidden>
+    <div class="row">
+      <label>Actual total (optional) <input id="expected" type="number" min="0" placeholder="¥"></label>
+      <button id="go" disabled>Analyze</button>
+      <span id="status" class="muted"></span>
+    </div>
+    <p id="error"></p>
+  </div>
+
+  <div class="grid">
+    <div class="card"><img id="preview" alt="Receipt preview"></div>
+    <div id="out" class="card" hidden>
+      <section>
+        <div class="row" style="margin:0">
+          <div class="score" id="score"></div>
+          <div class="muted" id="meta"></div>
+        </div>
+      </section>
+      <section><h2>Receipt</h2><div id="summary"></div></section>
+      <section><h2>Checks</h2><table id="checks"></table></section>
+      <section><h2>Suggestions</h2><ul id="suggestions"></ul></section>
+      <section><h2>kakeibo Expense JSON</h2><pre id="json"></pre></section>
+    </div>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let file = null;
+const yen = (n) => n == null ? '—' : '¥' + n.toLocaleString('ja-JP');
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function pick(f) {
+  if (!f || !f.type.startsWith('image/')) return;
+  file = f;
+  $('preview').src = URL.createObjectURL(f);
+  $('preview').style.display = 'block';
+  $('go').disabled = false;
+  $('error').textContent = '';
+}
+$('drop').onclick = () => $('file').click();
+$('file').onchange = (e) => pick(e.target.files[0]);
+$('drop').ondragover = (e) => { e.preventDefault(); $('drop').classList.add('over'); };
+$('drop').ondragleave = () => $('drop').classList.remove('over');
+$('drop').ondrop = (e) => { e.preventDefault(); $('drop').classList.remove('over'); pick(e.dataTransfer.files[0]); };
+
+$('go').onclick = async () => {
+  const img = $('preview');
+  const headers = { 'Content-Type': file.type, 'X-Image-Width': img.naturalWidth, 'X-Image-Height': img.naturalHeight };
+  if ($('expected').value) headers['X-Expected-Total'] = $('expected').value;
+  $('go').disabled = true; $('error').textContent = '';
+  const t0 = Date.now();
+  const timer = setInterval(() => $('status').textContent = `Analyzing… ${Math.round((Date.now() - t0) / 1000)} s`, 500);
+  try {
+    const res = await fetch('/parse', { method: 'POST', headers, body: file });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    render(data);
+  } catch (e) {
+    $('error').textContent = e.message;
+  } finally {
+    clearInterval(timer); $('status').textContent = ''; $('go').disabled = false;
+  }
+};
+
+function render({ model, seconds, receipt: r, expense, assessment: a }) {
+  $('out').hidden = false;
+  $('score').textContent = a.score;
+  $('score').className = 'score ' + (a.score >= 80 ? 'ok' : 'bad');
+  $('meta').innerHTML = `confidence score / 100<br>${esc(model)} · ${seconds} s`;
+  const items = r.items.map((i) => `<tr><td>${esc(i.name)}${i.qty ? ` <span class="muted">× ${i.qty}${i.unit && i.unit !== 'pc' ? i.unit : ''}</span>` : ''}${i.kind ? ` <span class="muted">· ${esc(i.kind)}</span>` : ''}</td><td class="num">${yen(i.price)}</td></tr>`).join('');
+  const charges = r.charges.map((c) => `<tr><td class="muted">${esc(c.kind)}: ${esc(c.name)}</td><td class="num">${yen(c.amount)}</td></tr>`).join('');
+  $('summary').innerHTML = `<p style="margin:0 0 8px"><b>${esc(r.store || '(no store)')}</b> · ${esc(r.date || '(no date)')} · ${esc(r.categoryId)}</p>
+    <table>${items}${charges}<tr><th>Total</th><th class="num">${yen(r.total)}</th></tr></table>`;
+  $('checks').innerHTML = a.checks.map((c) => `<tr><td class="${c.ok ? 'ok' : 'bad'}">${c.ok ? '✓' : '✗'}</td><td>${esc(c.name)}<div class="muted">${esc(c.detail)}</div></td></tr>`).join('');
+  $('suggestions').innerHTML = a.suggestions.length ? a.suggestions.map((s) => `<li>${esc(s)}</li>`).join('') : '<li class="muted">No problems found.</li>';
+  $('json').textContent = JSON.stringify(expense, null, 2);
+}
+</script>
+</body>
+</html>
