@@ -12,12 +12,14 @@ import os
 import re
 import sys
 import time
+import unicodedata
 import uuid
 from datetime import date as Date
 from pathlib import Path
 from typing import List, Literal, Optional, Union
 
 import ollama
+import pykakasi
 from pydantic import BaseModel, Field, ValidationError
 
 from categorizer import categorize
@@ -40,6 +42,8 @@ ChargeKind = Literal["tax", "shipping", "fee", "discount", "other"]
 
 class ReceiptItem(BaseModel):
     name: str = Field(max_length=100, description="Item name in Japanese, exactly as printed")
+    reading: Optional[str] = Field(None, description="Reading of the name in hiragana (furigana)")
+    en: Optional[str] = Field(None, description="Short English translation of the name, 6 words or fewer")
     price: int = Field(description="Line price in yen: unit price × qty")
     qty: Optional[int] = Field(None, description="Count of a multi-pack line (2–999), or grams / ml when unit is g or ml. Missing means 1")
     unit: Optional[Literal["pc", "g", "ml"]] = Field(None, description="'g' or 'ml' for a line sold by weight or volume. Missing means pieces")
@@ -65,7 +69,8 @@ class ParsedReceipt(BaseModel):
 
 def clean_item(i: ReceiptItem) -> ReceiptItem:
     """Apply kakeibo's qtyAndUnit and packSize rules, so the item saves unchanged."""
-    d = {"name": i.name.strip()[:100], "price": i.price, "kind": i.kind}
+    d = {"name": i.name.strip()[:100], "price": i.price, "kind": i.kind,
+         "reading": (i.reading or "").strip()[:120] or None, "en": (i.en or "").strip()[:120] or None}
     q = i.qty
     if i.unit in ("g", "ml") and q is not None and 1 <= q <= 100_000:
         d.update(qty=q, unit=i.unit)
@@ -136,7 +141,8 @@ def to_expense(r: ParsedReceipt, raw_text: str = "") -> dict:
         "note": "",
         "ocrEngine": "vision",
         "rawText": raw_text,
-        "items": [i.model_dump(exclude_none=True) for i in r.items],
+        # kakeibo makes its own reading and translation (item_gloss), so the Expense has none.
+        "items": [i.model_dump(exclude_none=True, exclude={"reading", "en"}) for i in r.items],
         "charges": [c.model_dump() for c in r.charges],
         "updatedAt": int(time.time() * 1000),
     }
@@ -160,7 +166,21 @@ Rules:
     alcohol, frozen, ready_meals, seasonings, household, personal_care, medicine, clothing, baby, pet,
     stationery, electronics, or other.
 13. categoryId is the category of the whole receipt: groceries (supermarket), dining (restaurant, cafe),
-    konbini (convenience store), daily, transport, medical, clothing, entertainment, utilities, or other."""
+    konbini (convenience store), daily, transport, medical, clothing, entertainment, utilities, or other.
+14. reading is the full reading of the item name in hiragana. Keep Latin letters and numbers as they are.
+    en is a short English translation of the item name (6 words or fewer). For a brand or product name,
+    romanize it and add the product type after a dash, for example "Meiji Takenoko no Sato – chocolate snack"."""
+
+
+def model_schema() -> dict:
+    """The JSON schema that the model must follow. reading and en are required strings here, so the
+    model always writes them. ParsedReceipt keeps them optional: labels and kakeibo data have none."""
+    schema = ParsedReceipt.model_json_schema()
+    item = schema["$defs"]["ReceiptItem"]
+    for field in ("reading", "en"):
+        item["properties"][field] = {"type": "string", "description": item["properties"][field]["description"]}
+    item["required"] = list(dict.fromkeys(item.get("required", []) + ["reading", "en"]))
+    return schema
 
 
 def _image_bytes(image: Union[str, Path, bytes]) -> bytes:
@@ -169,7 +189,7 @@ def _image_bytes(image: Union[str, Path, bytes]) -> bytes:
 
 def cache_path(image: Union[str, Path, bytes]) -> Path:
     """Where the raw answer for this image is kept. A new model, prompt, or schema gets a new folder."""
-    prompt = hashlib.sha1((SYSTEM_PROMPT + json.dumps(ParsedReceipt.model_json_schema())).encode()).hexdigest()[:12]
+    prompt = hashlib.sha1((SYSTEM_PROMPT + json.dumps(model_schema())).encode()).hexdigest()[:12]
     image_key = hashlib.sha1(_image_bytes(image)).hexdigest()
     return CACHE / re.sub(r"[^\w.-]", "_", MODEL) / prompt / f"{image_key}.json"
 
@@ -195,7 +215,7 @@ def raw_parse(image: Union[str, Path, bytes], keep_alive: Optional[Union[int, st
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": "Read this receipt.", "images": [data]},
         ],
-        format=ParsedReceipt.model_json_schema(),
+        format=model_schema(),
         options={"temperature": 0, "num_ctx": 8192},
         keep_alive=keep_alive,
     )
@@ -207,8 +227,25 @@ def raw_parse(image: Union[str, Path, bytes], keep_alive: Optional[Union[int, st
     return content
 
 
+_kakasi = pykakasi.kakasi()
+KANJI = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff々〆]")
+
+
+def kana_reading(name: str) -> Optional[str]:
+    """The reading of a name: kanji become hiragana (pykakasi dictionary). Katakana, hiragana, Latin
+    letters, and numbers stay as printed. None when the name has no kanji: there is nothing to read."""
+    # NFKC: half-width katakana (ｷﾝｼｮｳ) and full-width letters become the normal forms first.
+    text = unicodedata.normalize("NFKC", name)
+    if not KANJI.search(text):
+        return None
+    return "".join(part["hira"] if KANJI.search(part["orig"]) else part["orig"]
+                   for part in _kakasi.convert(text)).strip() or None
+
+
 def postprocess(raw: str) -> ParsedReceipt:
     r = fix(clean(ParsedReceipt.model_validate_json(raw)))
+    # The dictionary reads kanji and katakana better than the model, which often copies the name.
+    r = r.model_copy(update={"items": [i.model_copy(update={"reading": kana_reading(i.name)}) for i in r.items]})
     # The store list and item keywords pick the category better than the model. Use the model's only as a fallback.
     category = categorize(r.store, (i.name for i in r.items))
     return r.model_copy(update={"categoryId": category}) if category else r

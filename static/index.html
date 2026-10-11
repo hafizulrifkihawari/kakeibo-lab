@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Receipt Parser</title>
+<title>kakeibo lab</title>
 <style>
   :root { --bg:#f7f7f5; --card:#fff; --fg:#1d1d1b; --muted:#6b6b66; --line:#e3e3de; --ok:#1f7a4d; --bad:#b3261e; --accent:#2f5bd3; }
   @media (prefers-color-scheme: dark) {
@@ -23,6 +23,9 @@
   input[type=number] { width:140px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
   button { padding:8px 16px; border:0; border-radius:6px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer; }
   button:disabled { opacity:.5; cursor:default; }
+  button.secondary { background:transparent; color:var(--accent); border:1px solid var(--line); }
+  button.danger { background:transparent; color:var(--bad); border:1px solid var(--line); }
+  button.small { padding:4px 10px; font-size:13px; }
   #preview { max-width:100%; border-radius:6px; display:none; }
   .score { font-size:40px; font-weight:700; line-height:1; }
   .muted { color:var(--muted); font-size:13px; }
@@ -33,21 +36,52 @@
   ul { margin:0; padding-left:20px; }
   pre { background:var(--bg); padding:10px; border-radius:6px; overflow:auto; font-size:12px; margin:0; }
   section + section { margin-top:16px; }
-  #error, #saveError { color:var(--bad); }
+  .error { color:var(--bad); margin:8px 0 0; }
+  .error ul { padding-left:18px; }
+  details summary { cursor:pointer; color:var(--muted); font-size:13px; }
+
+  /* Inbox and review */
   #inbox .row { margin:0; }
   #syncInfo.bad { color:var(--bad); }
-  #reviewImg { max-width:100%; border-radius:6px; }
-  td.mark { width:1%; white-space:nowrap; text-align:center; }
-  th.src, td.src { width:22%; }
+  #photo { position:sticky; top:12px; align-self:start; max-height:calc(100vh - 24px); overflow:auto; }
+  @media (max-width:800px) { #photo { position:static; max-height:none; } }
+  #reviewImg { max-width:100%; border-radius:6px; cursor:zoom-in; display:block; }
+  #reviewImg.zoom { max-width:none; width:220%; cursor:zoom-out; }
+  th.src, td.src { width:24%; }
+  #labelsTable tr[data-id] { cursor:pointer; }
+  #labelsTable tr[data-id]:hover td { background:var(--bg); }
+  #labelsTable tr.open td { font-weight:600; }
   td.bad { color:var(--bad); font-weight:600; }
-  .actions button.secondary { background:transparent; color:var(--accent); border:1px solid var(--line); }
-  .actions button.danger { background:transparent; color:var(--bad); border:1px solid var(--line); }
-  textarea { width:100%; min-height:260px; font:12px/1.4 ui-monospace, monospace; padding:10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
+
+  /* Label form */
+  .ed h3 { font-size:14px; margin:16px 0 4px; }
+  .ed input, .ed select { padding:5px 7px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font:inherit; font-size:14px; min-width:0; width:100%; }
+  .ed input[type=number] { text-align:right; font-variant-numeric:tabular-nums; }
+  .ed input.wrong, .ed select.wrong { border-color:var(--bad); }
+  .ed-head { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:8px 12px; }
+  .ed-head label { display:flex; flex-direction:column; gap:2px; font-size:12px; color:var(--muted); }
+  .ed-row { display:grid; grid-template-columns:1.6em minmax(0,1fr) 6.5em auto; gap:4px 6px; align-items:center; padding:6px 0; border-bottom:1px solid var(--line); }
+  .ed-row .n { color:var(--muted); font-size:12px; text-align:right; }
+  .gloss { font-size:12px; color:var(--muted); }
+  .ed-row .gloss { grid-column:2 / -1; margin-top:-2px; }
+  .ed-row .gloss:empty { display:none; }
+  .ed-more { grid-column:2 / -1; display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:12px; color:var(--muted); }
+  .ed-more label { display:flex; align-items:center; gap:4px; }
+  .ed-more input { width:4.8em; }
+  .ed-more select { width:auto; }
+  .ed-charge { grid-template-columns:1.6em 7.5em minmax(0,1fr) 6.5em auto; }
+  button.x { background:transparent; color:var(--muted); border:1px solid var(--line); padding:3px 9px; font-weight:400; }
+  .marks { display:flex; gap:4px; margin-left:auto; }
+  .marks span { padding:0 7px; border-radius:10px; border:1px solid var(--line); white-space:nowrap; }
+  .ed-add { margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; }
+  .ed-extra { margin-top:8px; font-size:13px; }
+  .ed-extra button { margin:2px 4px 2px 0; }
+  .ed-sum { margin:12px 0 0; padding:8px 10px; border-radius:6px; background:var(--bg); font-size:14px; font-variant-numeric:tabular-nums; }
 </style>
 </head>
 <body>
 <main>
-  <h1>Japanese Receipt Parser</h1>
+  <h1>kakeibo lab</h1>
   <div class="card" id="inbox">
     <div class="row">
       <h2 style="margin:0">Inbox from kakeibo</h2>
@@ -57,27 +91,42 @@
     <p id="syncInfo" class="muted" style="margin:8px 0 0"></p>
   </div>
 
+  <div class="card" id="labelsCard" style="margin-top:16px">
+    <div class="row" style="margin:0">
+      <h2 style="margin:0">Labeled receipts</h2>
+      <span id="labelsCount" class="muted"></span>
+      <button id="toggleLabels" class="secondary small">Show</button>
+    </div>
+    <div id="labelsList" hidden style="margin-top:8px; overflow-x:auto">
+      <p class="muted" style="margin:0 0 6px">Click a receipt to open it in the review form. You can fix it, run the model again, or delete it.</p>
+      <table id="labelsTable"></table>
+    </div>
+  </div>
+
   <div class="grid" id="review" hidden>
-    <div class="card"><img id="reviewImg" alt="Receipt photo"></div>
+    <div class="card" id="photo">
+      <img id="reviewImg" alt="Receipt photo" title="Click to zoom">
+    </div>
     <div class="card">
+      <p id="reviewTitle" class="muted" style="margin:0 0 12px"></p>
       <section>
         <h2>Compare</h2>
-        <p class="muted" style="margin:0 0 8px">Label is what you saved in kakeibo. Red cells do not agree with the label: check them on the photo.</p>
+        <p class="muted" style="margin:0 0 8px">The label is the form below. It starts as the expense you saved in kakeibo. Red cells do not agree with the label: check them on the photo.</p>
         <table id="compare"></table>
       </section>
-      <section><h2>Items</h2><table id="itemCompare"></table><p id="extra" class="muted"></p></section>
       <section>
         <h2>Label</h2>
-        <p class="muted" style="margin:0 0 8px">Make the JSON match the receipt exactly. Then accept it: it goes to training-images/ and eval.py uses it.</p>
-        <textarea id="reviewLabel" spellcheck="false"></textarea>
-        <div class="row actions">
+        <p class="muted" style="margin:0 0 4px">Make each field match the receipt. The tags on each item show whether the model and the kakeibo scan found it: ✓ same name and price, ≈ same price but another name (hover to see it), ✗ not found.</p>
+        <div id="reviewEditor"></div>
+        <div class="row">
           <button id="accept">Accept</button>
           <button id="useQwen" class="secondary">Use the model's reading</button>
           <button id="runQwen" class="secondary">Run the model</button>
           <button id="discard" class="danger">Discard</button>
           <span id="reviewStatus" class="muted"></span>
         </div>
-        <p id="reviewError" style="color:var(--bad)"></p>
+        <div id="reviewError" class="error"></div>
+        <details style="margin-top:12px"><summary>Label as JSON</summary><pre id="reviewJson"></pre></details>
       </section>
     </div>
   </div>
@@ -90,7 +139,7 @@
       <button id="go" disabled>Analyze</button>
       <span id="status" class="muted"></span>
     </div>
-    <p id="error"></p>
+    <p id="error" class="error"></p>
   </div>
 
   <div class="grid">
@@ -107,12 +156,12 @@
       <section><h2>Suggestions</h2><ul id="suggestions"></ul></section>
       <section>
         <h2>Correct and save</h2>
-        <p class="muted" style="margin:0 0 8px">Fix the JSON so it matches the receipt exactly, then save it. Saved receipts go to training-images/ and eval.py measures the parser against them.</p>
-        <textarea id="label" spellcheck="false"></textarea>
+        <p class="muted" style="margin:0 0 4px">Make each field match the receipt, then save it. Saved receipts go to training-images/ and eval.py measures the parser against them.</p>
+        <div id="labelEditor"></div>
         <div class="row"><button id="save">Save as correct</button><span id="saveStatus" class="muted"></span></div>
-        <p id="saveError"></p>
+        <div id="saveError" class="error"></div>
       </section>
-      <section><h2>kakeibo Expense JSON</h2><pre id="json"></pre></section>
+      <section><details><summary>kakeibo Expense JSON</summary><pre id="json"></pre></details></section>
     </div>
   </div>
 </main>
@@ -121,6 +170,239 @@ const $ = (id) => document.getElementById(id);
 let file = null;
 const yen = (n) => n == null ? '—' : '¥' + n.toLocaleString('ja-JP');
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const norm = (s) => String(s ?? '').normalize('NFKC').replace(/[\s　]/g, '').toLowerCase();
+// Furigana and English of an item, from the model: "[ほねとりさばふぃれ] (Boneless mackerel fillet)".
+const glossText = (i) => [i?.reading && `[${i.reading}]`, i?.en && `(${i.en})`].filter(Boolean).join(' ');
+const sum = (r) => r ? r.items.reduce((s, i) => s + (i.price || 0), 0) + r.charges.reduce((s, c) => s + (c.amount || 0), 0) : null;
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error);
+  return data;
+}
+
+function showErrors(el, errors) {
+  el.innerHTML = errors.length ? `<ul>${errors.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>` : '';
+}
+
+// ── Label form ───────────────────────────────────────────────────────────
+// A form for one ParsedReceipt (ocr_engine.py). Used by the review and by "Correct and save".
+let OPTS = { categories: ['other'], kinds: [], chargeKinds: ['tax', 'shipping', 'fee', 'discount', 'other'] };
+const optionsReady = api('/options').then((o) => { OPTS = o; }).catch(() => {});
+
+const options = (values, selected, blank) =>
+  (blank !== undefined ? `<option value="">${esc(blank)}</option>` : '') +
+  values.map((v) => `<option value="${esc(v)}"${v === selected ? ' selected' : ''}>${esc(v)}</option>`).join('');
+
+function makeEditor(root) {
+  root.classList.add('ed');
+  root.innerHTML = `
+    <div class="ed-head">
+      <label>Store<input data-h="store" placeholder="Without 株式会社"></label>
+      <label>Date<input data-h="date" type="date"></label>
+      <label>Total (¥)<input data-h="total" type="number" step="1" placeholder="合計"></label>
+      <label>Category<select data-h="categoryId"></select></label>
+    </div>
+    <h3>Items</h3>
+    <div class="ed-items"></div>
+    <div class="ed-add"><button type="button" class="secondary small" data-act="add-item">+ Add item</button></div>
+    <div class="ed-extra muted"></div>
+    <h3>Other costs <span class="muted">· 外税 tax on top, shipping, fees; a discount is negative</span></h3>
+    <div class="ed-charges"></div>
+    <div class="ed-add"><button type="button" class="secondary small" data-act="add-charge">+ Add cost</button></div>
+    <p class="ed-sum"></p>`;
+  const head = (k) => root.querySelector(`[data-h="${k}"]`);
+  const itemsEl = root.querySelector('.ed-items'), chargesEl = root.querySelector('.ed-charges');
+  let sources = {};       // { 'Model': receipt, 'kakeibo': receipt } for the item tags
+  let leftovers = {};     // items that only a source found, for "+ add"
+  const listeners = [];
+
+  function itemRow(i = {}) {
+    const d = document.createElement('div');
+    d.className = 'ed-row ed-item';
+    d.dataset.gloss = glossText(i);  // Only shown. The label keeps kakeibo's format, without reading and en.
+    d.innerHTML = `
+      <span class="n"></span>
+      <input data-k="name" placeholder="Name as printed" value="${esc(i.name)}">
+      <input data-k="price" type="number" step="1" placeholder="¥ line" title="Line price: unit price × qty" value="${i.price ?? ''}">
+      <button type="button" class="x" data-act="del" title="Remove this item">✕</button>
+      <div class="gloss"></div>
+      <div class="ed-more">
+        <label title="Pieces, or grams / ml for a line sold by weight">Qty<input data-k="qty" type="number" min="1" step="1" placeholder="1" value="${i.qty ?? ''}"></label>
+        <select data-k="unit" title="pc: pieces. g / ml: sold by weight or volume">${options(['pc', 'g', 'ml'], i.unit || 'pc')}</select>
+        <label title="Pack size of one piece, such as 1000 for 牛乳 1000ml">Size<input data-k="size" type="number" min="0" step="1" value="${i.size ?? ''}"></label>
+        <select data-k="sizeUnit" title="Unit of the pack size">${options(['g', 'ml'], i.sizeUnit, '—')}</select>
+        <select data-k="kind" title="Kind of item">${options(OPTS.kinds, i.kind, 'kind —')}</select>
+        <span class="marks"></span>
+      </div>`;
+    return d;
+  }
+
+  function chargeRow(c = {}) {
+    const d = document.createElement('div');
+    d.className = 'ed-row ed-charge';
+    d.innerHTML = `
+      <span class="n"></span>
+      <select data-k="kind">${options(OPTS.chargeKinds, c.kind || 'tax')}</select>
+      <input data-k="name" placeholder="Label, such as 外税 8%" value="${esc(c.name)}">
+      <input data-k="amount" type="number" step="1" placeholder="¥" value="${c.amount ?? ''}">
+      <button type="button" class="x" data-act="del" title="Remove this cost">✕</button>`;
+    return d;
+  }
+
+  const val = (row, k) => row.querySelector(`[data-k="${k}"]`).value;
+  const num = (v) => (String(v).trim() === '' ? null : Number(v));
+
+  // Reads the form and returns { receipt, errors }. With mark, wrong fields turn red.
+  function read(mark = true) {
+    const errors = [];
+    if (mark) root.querySelectorAll('.wrong').forEach((el) => el.classList.remove('wrong'));
+    const bad = (el, msg) => { if (mark) el.classList.add('wrong'); errors.push(msg); };
+    const total = num(head('total').value);
+    if (total !== null && !Number.isInteger(total)) bad(head('total'), 'The total must be a whole number of yen.');
+    const receipt = {
+      store: head('store').value.trim() || null,
+      date: head('date').value || null,
+      total: Number.isInteger(total) ? total : null,
+      categoryId: head('categoryId').value || 'other',
+      items: [],
+      charges: [],
+    };
+    itemsEl.querySelectorAll('.ed-item').forEach((row, n) => {
+      const name = val(row, 'name').trim(), price = num(val(row, 'price'));
+      if (!name && price === null) return;  // An empty row is left out.
+      const label = `Item ${n + 1}${name ? ` (${name})` : ''}`;
+      if (!name) bad(row.querySelector('[data-k="name"]'), `${label}: the name is empty.`);
+      if (!Number.isInteger(price)) bad(row.querySelector('[data-k="price"]'), `${label}: the price must be a whole number.`);
+      const item = { name, price: Number.isInteger(price) ? price : 0 };
+      const qty = num(val(row, 'qty')), unit = val(row, 'unit');
+      if (unit !== 'pc') {
+        if (!Number.isInteger(qty) || qty < 1) bad(row.querySelector('[data-k="qty"]'), `${label}: enter the ${unit} as Qty.`);
+        else Object.assign(item, { qty, unit });
+      } else if (qty !== null && qty !== 1) {
+        if (!Number.isInteger(qty) || qty < 2 || qty > 999) bad(row.querySelector('[data-k="qty"]'), `${label}: Qty must be 2 to 999 pieces.`);
+        else item.qty = qty;
+      }
+      const size = num(val(row, 'size')), sizeUnit = val(row, 'sizeUnit');
+      if (size === 0) item.size = 0;
+      else if (size !== null) {
+        if (!Number.isInteger(size) || size < 1) bad(row.querySelector('[data-k="size"]'), `${label}: the size must be a whole number.`);
+        else if (!sizeUnit) bad(row.querySelector('[data-k="sizeUnit"]'), `${label}: pick g or ml for the size.`);
+        else Object.assign(item, { size, sizeUnit });
+      }
+      const kind = val(row, 'kind');
+      if (kind) item.kind = kind;
+      receipt.items.push(item);
+    });
+    chargesEl.querySelectorAll('.ed-charge').forEach((row, n) => {
+      const name = val(row, 'name').trim(), amount = num(val(row, 'amount'));
+      if (!name && amount === null) return;
+      const label = `Cost ${n + 1}${name ? ` (${name})` : ''}`;
+      if (!Number.isInteger(amount)) bad(row.querySelector('[data-k="amount"]'), `${label}: the amount must be a whole number.`);
+      receipt.charges.push({ kind: val(row, 'kind'), name, amount: Number.isInteger(amount) ? amount : 0 });
+    });
+    return { receipt, errors };
+  }
+
+  function number(el) {
+    el.querySelectorAll('.n').forEach((n, i) => { n.textContent = i + 1; });
+  }
+
+  // The tags on each item: did the model / the kakeibo scan find an item with the same price? Like eval.py.
+  function tag() {
+    leftovers = {};
+    const rows = [...itemsEl.querySelectorAll('.ed-item')];
+    rows.forEach((row) => {
+      row.querySelector('.marks').innerHTML = '';
+      row.querySelector('.gloss').textContent = row.dataset.gloss || '';
+    });
+    for (const [name, r] of Object.entries(sources)) {
+      if (!r) continue;
+      const left = [...r.items];
+      rows.forEach((row) => {
+        const price = num(val(row, 'price'));
+        const i = left.findIndex((x) => x.price === price);
+        let html;
+        if (i < 0) html = `<span class="bad" title="${esc(name)} has no item at this price">${esc(name)} ✗</span>`;
+        else {
+          const same = norm(left[i].name) === norm(val(row, 'name'));
+          const g = row.querySelector('.gloss');
+          if (!g.textContent && glossText(left[i])) g.textContent = glossText(left[i]);
+          html = `<span class="${same ? 'ok' : ''}" title="${esc(name)}: ${esc(left[i].name)}">${esc(name)} ${same ? '✓' : '≈'}</span>`;
+          left.splice(i, 1);
+        }
+        row.querySelector('.marks').insertAdjacentHTML('beforeend', html);
+      });
+      leftovers[name] = left;
+    }
+    root.querySelector('.ed-extra').innerHTML = Object.entries(leftovers).filter(([, l]) => l.length).map(([name, l]) =>
+      `<div>Only in ${esc(name)}: ${l.map((i, k) => `<button type="button" class="secondary small" data-act="add-from" data-src="${esc(name)}" data-i="${k}" title="Add this item to the label">+ ${esc(i.name)} ${yen(i.price)}</button>`).join('')}</div>`).join('');
+  }
+
+  function update() {
+    number(itemsEl); number(chargesEl);
+    tag();
+    const { receipt } = read(false);  // Do not mark fields red while the user types.
+    const items = receipt.items.reduce((s, i) => s + i.price, 0);
+    const costs = receipt.charges.reduce((s, c) => s + c.amount, 0);
+    const el = root.querySelector('.ed-sum');
+    let note = '';
+    if (receipt.total !== null) {
+      const diff = receipt.total - items - costs;
+      note = diff === 0 ? ' <b class="ok">✓ equals the total</b>'
+        : ` <b class="bad">✗ ${yen(Math.abs(diff))} ${diff > 0 ? 'less' : 'more'} than the total ${yen(receipt.total)}</b>`;
+    }
+    el.innerHTML = `Items ${yen(items)} + other costs ${yen(costs)} = ${yen(items + costs)}${note}`;
+    listeners.forEach((fn) => fn(receipt));
+  }
+
+  root.addEventListener('input', update);
+  root.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-act]');
+    if (!b) return;
+    const act = b.dataset.act;
+    if (act === 'del') {
+      b.closest('.ed-row').remove();
+    } else if (act === 'add-item') {
+      itemsEl.append(itemRow());
+      itemsEl.lastElementChild.querySelector('input').focus();
+    } else if (act === 'add-charge') {
+      chargesEl.append(chargeRow());
+      chargesEl.lastElementChild.querySelector('input').focus();
+    } else if (act === 'add-from') {
+      itemsEl.append(itemRow(leftovers[b.dataset.src][Number(b.dataset.i)]));
+    }
+    update();
+  });
+  // Enter in the last item adds a new item.
+  itemsEl.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.isComposing || e.target.tagName !== 'INPUT') return;
+    e.preventDefault();
+    const row = e.target.closest('.ed-item');
+    if (row === itemsEl.lastElementChild) { itemsEl.append(itemRow()); update(); }
+    row.nextElementSibling.querySelector('input').focus();
+  });
+
+  return {
+    async set(r) {
+      await optionsReady;
+      head('store').value = r?.store ?? '';
+      head('date').value = r?.date ?? '';
+      head('total').value = r?.total ?? '';
+      head('categoryId').innerHTML = options(OPTS.categories, r?.categoryId || 'other');
+      itemsEl.replaceChildren(...(r?.items ?? []).map(itemRow));
+      chargesEl.replaceChildren(...(r?.charges ?? []).map(chargeRow));
+      update();
+    },
+    setSources(s) { sources = s; update(); },
+    read: () => read(true),
+    onChange(fn) { listeners.push(fn); },
+  };
+}
+
+// ── Upload and parse ─────────────────────────────────────────────────────
+const saveEditor = makeEditor($('labelEditor'));
 
 function pick(f) {
   if (!f || !f.type.startsWith('image/')) return;
@@ -160,14 +442,14 @@ function render({ model, seconds, receipt: r, expense, assessment: a }) {
   $('score').textContent = a.score;
   $('score').className = 'score ' + (a.score >= 80 ? 'ok' : 'bad');
   $('meta').innerHTML = `confidence score / 100<br>${esc(model)} · ${seconds} s`;
-  const items = r.items.map((i) => `<tr><td>${esc(i.name)}${i.qty ? ` <span class="muted">× ${i.qty}${i.unit && i.unit !== 'pc' ? i.unit : ''}</span>` : ''}${i.kind ? ` <span class="muted">· ${esc(i.kind)}</span>` : ''}</td><td class="num">${yen(i.price)}</td></tr>`).join('');
+  const items = r.items.map((i) => `<tr><td>${esc(i.name)}${glossText(i) ? `<div class="gloss">${esc(glossText(i))}</div>` : ''}${i.qty ? ` <span class="muted">× ${i.qty}${i.unit && i.unit !== 'pc' ? i.unit : ''}</span>` : ''}${i.kind ? ` <span class="muted">· ${esc(i.kind)}</span>` : ''}</td><td class="num">${yen(i.price)}</td></tr>`).join('');
   const charges = r.charges.map((c) => `<tr><td class="muted">${esc(c.kind)}: ${esc(c.name)}</td><td class="num">${yen(c.amount)}</td></tr>`).join('');
   $('summary').innerHTML = `<p style="margin:0 0 8px"><b>${esc(r.store || '(no store)')}</b> · ${esc(r.date || '(no date)')} · ${esc(r.categoryId)}</p>
     <table>${items}${charges}<tr><th>Total</th><th class="num">${yen(r.total)}</th></tr></table>`;
   $('checks').innerHTML = a.checks.map((c) => `<tr><td class="${c.ok ? 'ok' : 'bad'}">${c.ok ? '✓' : '✗'}</td><td>${esc(c.name)}<div class="muted">${esc(c.detail)}</div></td></tr>`).join('');
   $('suggestions').innerHTML = a.suggestions.length ? a.suggestions.map((s) => `<li>${esc(s)}</li>`).join('') : '<li class="muted">No problems found.</li>';
   $('json').textContent = JSON.stringify(expense, null, 2);
-  $('label').value = JSON.stringify(r, null, 2);
+  saveEditor.set(r);
   $('saveStatus').textContent = ''; $('saveError').textContent = '';
 }
 
@@ -178,16 +460,25 @@ const base64 = (f) => new Promise((ok, fail) => {
   rd.readAsDataURL(f);
 });
 
+$('save').onclick = async () => {
+  $('saveError').textContent = ''; $('saveStatus').textContent = '';
+  const { receipt, errors } = saveEditor.read();
+  if (errors.length) { showErrors($('saveError'), errors); return; }
+  $('save').disabled = true;
+  try {
+    const data = await api('/save', { receipt, image: await base64(file), type: file.type, filename: file.name });
+    $('saveStatus').textContent = `Saved ${data.saved}. ${data.labeled} labeled receipts.`;
+  } catch (e) {
+    $('saveError').textContent = e.message;
+  } finally {
+    $('save').disabled = false;
+  }
+};
+
 // ── Inbox: receipts from kakeibo ─────────────────────────────────────────
 let current = null;
 const STALE_HOURS = 48;
-
-async function api(path, body) {
-  const res = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error);
-  return data;
-}
+const reviewEditor = makeEditor($('reviewEditor'));
 
 async function loadInbox() {
   try {
@@ -213,11 +504,10 @@ async function loadInbox() {
   }
 }
 
-const norm = (s) => String(s ?? '').normalize('NFKC').replace(/[\s　]/g, '').toLowerCase();
-const sum = (r) => r ? r.items.reduce((s, i) => s + i.price, 0) + r.charges.reduce((s, c) => s + c.amount, 0) : null;
-
-function renderCompare() {
-  const { label, qwen, prod } = current;
+// The summary table: the label (the live form) against the model and the kakeibo scan.
+function renderCompare(label) {
+  if (!current) return;
+  const { qwen, prod } = current;
   const p = prod && prod.receipt;
   const rows = [
     ['Store', (r) => r?.store, (a, b) => norm(a) === norm(b)],
@@ -225,7 +515,7 @@ function renderCompare() {
     ['Total', (r) => r?.total, null, yen],
     ['Category', (r) => r?.categoryId],
     ['Items', (r) => r?.items.length],
-    ['Items + charges', sum, null, yen],
+    ['Items + costs', sum, null, yen],
   ];
   const cell = (r, get, same, fmt) => {
     if (!r) return '<td class="src muted">—</td>';
@@ -235,36 +525,38 @@ function renderCompare() {
   };
   $('compare').innerHTML = `<tr><th></th><th class="src">Label</th><th class="src">Model (${esc(current.model)})</th><th class="src">kakeibo scan${prod ? ` (${esc(prod.engine)})` : ''}</th></tr>` +
     rows.map(([name, get, same, fmt]) => `<tr><td>${name}</td>${cell(label, get, same, fmt)}${cell(qwen, get, same, fmt)}${cell(p, get, same, fmt)}</tr>`).join('');
-
-  // An item matches when the price is the same (like eval.py). Each item is used once.
-  const unmatched = (r) => r ? [...r.items] : null;
-  const leftQ = unmatched(qwen), leftP = unmatched(p);
-  const take = (left, item) => {
-    if (!left) return '<td class="mark muted">—</td>';
-    const i = left.findIndex((x) => x.price === item.price);
-    if (i < 0) return '<td class="mark bad">✗</td>';
-    const same = norm(left[i].name) === norm(item.name);
-    const html = `<td class="mark ${same ? 'ok' : ''}" title="${esc(left[i].name)}">${same ? '✓' : '≈'}</td>`;
-    left.splice(i, 1);
-    return html;
-  };
-  $('itemCompare').innerHTML = '<tr><th>Label item</th><th class="num">Price</th><th class="mark">Model</th><th class="mark">kakeibo</th></tr>' +
-    label.items.map((i) => `<tr><td>${esc(i.name)}${i.qty ? ` <span class="muted">× ${i.qty}${i.unit && i.unit !== 'pc' ? i.unit : ''}</span>` : ''}</td><td class="num">${yen(i.price)}</td>${take(leftQ, i)}${take(leftP, i)}</tr>`).join('');
-  const extra = (name, left) => left && left.length ? `<div>Only in ${name}: ${left.map((i) => `${esc(i.name)} ${yen(i.price)}`).join(', ')}</div>` : '';
-  $('extra').innerHTML = extra('the model', leftQ) + extra('the kakeibo scan', leftP) +
-    '<div>✓ same name and price · ≈ same price, other name (hover to see it) · ✗ missing</div>';
-  $('useQwen').disabled = !qwen;
-  $('runQwen').textContent = qwen ? 'Run the model again' : 'Run the model';
 }
 
-async function openReview(id) {
+reviewEditor.onChange((label) => {
+  renderCompare(label);
+  $('reviewJson').textContent = JSON.stringify(label, null, 2);
+});
+
+function showSources() {
+  reviewEditor.setSources({ Model: current.qwen, kakeibo: current.prod && current.prod.receipt });
+  $('useQwen').disabled = !current.qwen;
+  $('runQwen').textContent = current.qwen ? 'Run the model again' : 'Run the model';
+}
+
+// The review form shows an inbox receipt (mode 'inbox') or a saved label (mode 'label').
+const base = () => (current.mode === 'label' ? '/labels/' : '/inbox/') + encodeURIComponent(current.id);
+
+async function openReview(id, mode = 'inbox') {
   $('reviewError').textContent = ''; $('reviewStatus').textContent = 'Loading…';
   try {
-    current = await api('/inbox/' + id);
+    current = await api((mode === 'label' ? '/labels/' : '/inbox/') + encodeURIComponent(id));
+    current.mode = mode;
+    $('reviewTitle').textContent = mode === 'label'
+      ? `Saved label ${id} · changes overwrite training-images/${id}.json`
+      : `Inbox receipt ${id} · from kakeibo`;
+    $('accept').textContent = mode === 'label' ? 'Save changes' : 'Accept';
+    $('discard').textContent = mode === 'label' ? 'Delete label' : 'Discard';
+    markOpenLabel();
     $('review').hidden = false;
-    $('reviewImg').src = 'data:image/jpeg;base64,' + current.image;
-    $('reviewLabel').value = JSON.stringify(current.label, null, 2);
-    renderCompare();
+    $('reviewImg').classList.remove('zoom');
+    $('reviewImg').src = `data:${current.type || 'image/jpeg'};base64,` + current.image;
+    await reviewEditor.set(current.label);
+    showSources();
     $('reviewStatus').textContent = current.qwen ? '' : 'The model did not read this receipt yet.';
     $('review').scrollIntoView({ behavior: 'smooth' });
   } catch (e) {
@@ -279,14 +571,16 @@ async function next() {
 }
 
 $('reviewNext').onclick = () => openReview($('reviewNext').dataset.next);
+$('reviewImg').onclick = () => $('reviewImg').classList.toggle('zoom');
 
 $('runQwen').onclick = async () => {
   $('runQwen').disabled = true; $('reviewError').textContent = '';
   const t0 = Date.now();
   const timer = setInterval(() => $('reviewStatus').textContent = `Reading… ${Math.round((Date.now() - t0) / 1000)} s`, 500);
   try {
-    const d = await api(`/inbox/${current.id}/parse`, {});
-    current.qwen = d.receipt; renderCompare();
+    const d = await api(`${base()}/parse`, {});
+    current.qwen = d.receipt;
+    showSources();
     $('reviewStatus').textContent = `Read in ${d.seconds} s.`;
   } catch (e) {
     $('reviewError').textContent = e.message; $('reviewStatus').textContent = '';
@@ -297,18 +591,25 @@ $('runQwen').onclick = async () => {
 
 $('useQwen').onclick = () => {
   if (current?.qwen && confirm("Replace the label with the model's reading? Check every line after this.")) {
-    $('reviewLabel').value = JSON.stringify(current.qwen, null, 2);
+    reviewEditor.set(current.qwen);
   }
 };
 
 $('accept').onclick = async () => {
   $('reviewError').textContent = '';
-  let receipt;
-  try { receipt = JSON.parse($('reviewLabel').value); } catch (e) { $('reviewError').textContent = 'The JSON is not valid: ' + e.message; return; }
+  const { receipt, errors } = reviewEditor.read();
+  if (errors.length) { showErrors($('reviewError'), errors); return; }
   $('accept').disabled = true;
   try {
-    const d = await api(`/inbox/${current.id}/accept`, { receipt });
+    if (current.mode === 'label') {
+      const d = await api(`${base()}/save`, { receipt });
+      $('reviewStatus').textContent = `Saved ${d.saved}.`;
+      loadLabels();
+      return;
+    }
+    const d = await api(`${base()}/accept`, { receipt });
     $('reviewStatus').textContent = `Saved ${d.saved}.`;
+    loadLabels();
     await next();
   } catch (e) {
     $('reviewError').textContent = e.message;
@@ -318,29 +619,50 @@ $('accept').onclick = async () => {
 };
 
 $('discard').onclick = async () => {
+  if (current.mode === 'label') {
+    if (!confirm(`Delete the label ${current.id}, its photo, and the kakeibo scan? This cannot be undone.`)) return;
+    try {
+      await api(`${base()}/delete`, {});
+      $('review').hidden = true; current = null;
+      await Promise.all([loadLabels(), loadInbox()]);
+    } catch (e) { $('reviewError').textContent = e.message; }
+    return;
+  }
   if (!confirm('Discard this receipt? It is not used for eval or training.')) return;
-  try { await api(`/inbox/${current.id}/discard`, {}); await next(); } catch (e) { $('reviewError').textContent = e.message; }
+  try { await api(`${base()}/discard`, {}); await next(); } catch (e) { $('reviewError').textContent = e.message; }
+};
+
+// ── Saved labels ─────────────────────────────────────────────────────────
+async function loadLabels() {
+  try {
+    const { labels } = await api('/labels');
+    $('labelsCount').textContent = `${labels.length} saved · ${labels.filter((l) => l.split === 'test').length} in the test split`;
+    $('labelsTable').innerHTML = '<tr><th>Date</th><th>Store</th><th class="num">Total</th><th class="num">Items</th><th>Split</th><th>kakeibo scan</th></tr>' +
+      labels.map((l) => `<tr data-id="${esc(l.id)}" title="${esc(l.id)}"><td>${esc(l.date || '—')}</td><td>${esc(l.store || '—')}</td>` +
+        `<td class="num">${yen(l.total)}</td><td class="num">${l.items}</td><td>${l.split}</td><td>${l.kakeibo ? '✓' : ''}</td></tr>`).join('');
+    markOpenLabel();
+  } catch (e) {
+    $('labelsCount').textContent = 'Could not read the labels: ' + e.message;
+  }
+}
+
+function markOpenLabel() {
+  document.querySelectorAll('#labelsTable tr[data-id]').forEach((tr) =>
+    tr.classList.toggle('open', current?.mode === 'label' && tr.dataset.id === current.id));
+}
+
+$('toggleLabels').onclick = () => {
+  const list = $('labelsList');
+  list.hidden = !list.hidden;
+  $('toggleLabels').textContent = list.hidden ? 'Show' : 'Hide';
+};
+$('labelsTable').onclick = (e) => {
+  const tr = e.target.closest('tr[data-id]');
+  if (tr) openReview(tr.dataset.id, 'label');
 };
 
 loadInbox();
-
-$('save').onclick = async () => {
-  $('saveError').textContent = ''; $('saveStatus').textContent = '';
-  let receipt;
-  try { receipt = JSON.parse($('label').value); } catch (e) { $('saveError').textContent = 'The JSON is not valid: ' + e.message; return; }
-  $('save').disabled = true;
-  try {
-    const res = await fetch('/save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ receipt, image: await base64(file), type: file.type, filename: file.name }) });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error);
-    $('saveStatus').textContent = `Saved ${data.saved}. ${data.labeled} labeled receipts.`;
-  } catch (e) {
-    $('saveError').textContent = e.message;
-  } finally {
-    $('save').disabled = false;
-  }
-};
+loadLabels();
 </script>
 </body>
 </html>

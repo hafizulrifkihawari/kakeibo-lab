@@ -1,7 +1,10 @@
-# receipt-parser-jp
+# kakeibo-lab
 
-Parse Japanese receipt images offline with Qwen 2.5 VL on Ollama.
-The JSON output matches `ParsedReceipt` in the kakeibo app.
+A local lab for the receipt reading of [kakeibo](https://github.com/hafizulrifkihawari/kakeibo).
+
+- Read Japanese receipt photos offline with Qwen 2.5 VL on Ollama. The JSON output matches `ParsedReceipt` in kakeibo.
+- Collect the receipts you scan in kakeibo, and review them into labeled receipts.
+- Measure each change to the prompt, the rules, or the model against those labels. Keep it only if the score goes up.
 
 ## Setup
 
@@ -25,10 +28,12 @@ Output:
   "date": "2026-10-11",
   "total": 160,
   "categoryId": "konbini",
-  "items": [{ "name": "おにぎり 鮭", "price": 160, "kind": "ready_meals" }],
+  "items": [{ "name": "おにぎり 鮭", "reading": "おにぎり しゃけ", "en": "Salmon rice ball", "price": 160, "kind": "ready_meals" }],
   "charges": []
 }
 ```
+
+Each item has its reading in hiragana (`reading`, furigana) and a short English translation (`en`). The model writes the translation in the same call. The reading comes from the pykakasi dictionary after the call, because the model often copies the name instead of reading it. Only kanji get a reading in hiragana. Katakana, Latin letters, and numbers stay as printed. A name with no kanji has no reading. Saved labels and the kakeibo `Expense` leave them out: kakeibo makes its own (`item_gloss`).
 
 Add `--expense` to print a kakeibo `Expense` (`shared/types.ts`) that kakeibo can save as is.
 It has `id`, `amount`, `categoryId`, `ocrEngine`, `updatedAt`, and the items and charges.
@@ -124,7 +129,7 @@ For each scan, `sync.py` writes three files to `training-images/inbox/`: the pho
 ```bash
 .venv/bin/python sync.py --install     # run now, every day at 19:00, and at login
 .venv/bin/python sync.py --uninstall   # stop it
-launchctl print gui/$(id -u)/com.receipt-parser.sync | grep -E 'state|last exit'
+launchctl print gui/$(id -u)/com.kakeibo-lab.sync | grep -E 'state|last exit'
 ```
 
 - The job always downloads new scans. That takes a few seconds.
@@ -154,6 +159,8 @@ The **Inbox from kakeibo** card shows how many receipts wait and when the last s
 - **Accept** saves the label to `training-images/<id>.json` and keeps kakeibo's first reading in `training-images/prod/` for `--baseline prod`. **Discard** removes a bad photo.
 
 You often fix only the total and the category in kakeibo. So check every item name and price before you accept.
+
+The **Labeled receipts** card lists every saved label with its date, store, total, split, and whether it has a kakeibo scan. Click one to open it in the same review form. **Save changes** overwrites its label. **Run the model** reads it again. **Delete label** deletes the label, its photo, and the kakeibo scan, for example a receipt that you saved twice.
 
 ### Troubleshooting
 

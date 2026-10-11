@@ -33,7 +33,9 @@ LABELS = ROOT / "training-images"
 INBOX = LABELS / "inbox"
 LOGS = ROOT / "logs"
 SYNC_LOG = LOGS / "sync.log"
-JOB = "com.receipt-parser.sync"
+JOB = "com.kakeibo-lab.sync"
+# Names of the daily job in earlier versions. --install and --uninstall remove them.
+OLD_JOBS = ["com.receipt-parser.sync"]
 PLIST = Path.home() / "Library" / "LaunchAgents" / f"{JOB}.plist"
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 # A scan whose expense never arrived (the save failed) is deleted after this time.
@@ -267,6 +269,13 @@ def predict(scheduled: bool) -> tuple:
     return done, ""
 
 
+def remove_jobs(labels: List[str]) -> None:
+    """Stop each launchd job and delete its plist. A job that is not there is skipped."""
+    for label in labels:
+        subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{label}"], capture_output=True)
+        (PLIST.parent / f"{label}.plist").unlink(missing_ok=True)
+
+
 def install(local: bool) -> None:
     npx, node = shutil.which("npx"), shutil.which("node")
     if not npx or not node:
@@ -293,7 +302,7 @@ def install(local: bool) -> None:
         "StandardErrorPath": str(LOGS / "launchd.log"),
     }
     domain = f"gui/{os.getuid()}"
-    subprocess.run(["launchctl", "bootout", f"{domain}/{JOB}"], capture_output=True)  # Safe to run again.
+    remove_jobs([JOB] + OLD_JOBS)  # Safe to run again.
     PLIST.parent.mkdir(parents=True, exist_ok=True)
     PLIST.write_bytes(plistlib.dumps(job))
     done = subprocess.run(["launchctl", "bootstrap", domain, str(PLIST)], capture_output=True, text=True)
@@ -312,9 +321,7 @@ The job fails before it starts (logs/launchd.log: "Operation not permitted"). Do
 
 
 def uninstall() -> None:
-    subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{JOB}"], capture_output=True)
-    if PLIST.exists():
-        PLIST.unlink()
+    remove_jobs([JOB] + OLD_JOBS)
     print("Removed the daily sync job.")
 
 
