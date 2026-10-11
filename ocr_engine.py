@@ -6,6 +6,7 @@ The output follows the kakeibo data standard:
 Field names, enums and limits match kakeibo's validateExpense (src/server/fns.ts).
 """
 
+import hashlib
 import json
 import os
 import re
@@ -13,12 +14,17 @@ import sys
 import time
 import uuid
 from datetime import date as Date
+from pathlib import Path
 from typing import List, Literal, Optional, Union
 
 import ollama
 from pydantic import BaseModel, Field, ValidationError
 
+from categorizer import categorize
+
 MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5vl:7b")
+# Raw model answers, by model, prompt, and image. A change to clean() or fix() then needs no new model run.
+CACHE = Path(__file__).with_name(".cache")
 
 
 # kakeibo shared/categories.ts
@@ -157,18 +163,60 @@ Rules:
     konbini (convenience store), daily, transport, medical, clothing, entertainment, utilities, or other."""
 
 
-def parse_receipt(image: Union[str, bytes]) -> ParsedReceipt:
-    """Parse one receipt. image is a file path or the raw image bytes."""
+def _image_bytes(image: Union[str, Path, bytes]) -> bytes:
+    return image if isinstance(image, bytes) else Path(image).read_bytes()
+
+
+def cache_path(image: Union[str, Path, bytes]) -> Path:
+    """Where the raw answer for this image is kept. A new model, prompt, or schema gets a new folder."""
+    prompt = hashlib.sha1((SYSTEM_PROMPT + json.dumps(ParsedReceipt.model_json_schema())).encode()).hexdigest()[:12]
+    image_key = hashlib.sha1(_image_bytes(image)).hexdigest()
+    return CACHE / re.sub(r"[^\w.-]", "_", MODEL) / prompt / f"{image_key}.json"
+
+
+def cached_raw(image: Union[str, Path, bytes]) -> Optional[str]:
+    """The cached raw answer for this image, or None when the model did not read it yet."""
+    path = cache_path(image)
+    return path.read_text() if path.exists() else None
+
+
+def raw_parse(image: Union[str, Path, bytes], keep_alive: Optional[Union[int, str]] = None) -> str:
+    """The model's JSON for one receipt, before clean() and fix(). Uses the cache.
+
+    keep_alive 0 unloads the model after the call, to free its memory (the daily sync job).
+    """
+    data = _image_bytes(image)
+    cached = cached_raw(data)
+    if cached is not None:
+        return cached
     response = ollama.chat(
         model=MODEL,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": "Read this receipt.", "images": [image]},
+            {"role": "user", "content": "Read this receipt.", "images": [data]},
         ],
         format=ParsedReceipt.model_json_schema(),
         options={"temperature": 0, "num_ctx": 8192},
+        keep_alive=keep_alive,
     )
-    return fix(clean(ParsedReceipt.model_validate_json(response.message.content)))
+    content = response.message.content
+    ParsedReceipt.model_validate_json(content)  # Do not cache an answer that does not parse.
+    path = cache_path(data)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    return content
+
+
+def postprocess(raw: str) -> ParsedReceipt:
+    r = fix(clean(ParsedReceipt.model_validate_json(raw)))
+    # The store list and item keywords pick the category better than the model. Use the model's only as a fallback.
+    category = categorize(r.store, (i.name for i in r.items))
+    return r.model_copy(update={"categoryId": category}) if category else r
+
+
+def parse_receipt(image: Union[str, Path, bytes], keep_alive: Optional[Union[int, str]] = None) -> ParsedReceipt:
+    """Parse one receipt. image is a file path or the raw image bytes."""
+    return postprocess(raw_parse(image, keep_alive))
 
 
 def check_total(receipt: ParsedReceipt, image_path: str) -> None:

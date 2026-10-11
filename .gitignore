@@ -39,3 +39,8 @@ japanese_expenses.csv
 
 # Receipt photos (personal data)
 training-images/
+
+# Model answer cache, eval run history, and sync logs (personal data)
+.cache/
+runs/
+logs/

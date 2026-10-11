@@ -33,13 +33,56 @@
   ul { margin:0; padding-left:20px; }
   pre { background:var(--bg); padding:10px; border-radius:6px; overflow:auto; font-size:12px; margin:0; }
   section + section { margin-top:16px; }
-  #error { color:var(--bad); }
+  #error, #saveError { color:var(--bad); }
+  #inbox .row { margin:0; }
+  #syncInfo.bad { color:var(--bad); }
+  #reviewImg { max-width:100%; border-radius:6px; }
+  td.mark { width:1%; white-space:nowrap; text-align:center; }
+  th.src, td.src { width:22%; }
+  td.bad { color:var(--bad); font-weight:600; }
+  .actions button.secondary { background:transparent; color:var(--accent); border:1px solid var(--line); }
+  .actions button.danger { background:transparent; color:var(--bad); border:1px solid var(--line); }
+  textarea { width:100%; min-height:260px; font:12px/1.4 ui-monospace, monospace; padding:10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
 </style>
 </head>
 <body>
 <main>
   <h1>Japanese Receipt Parser</h1>
-  <div class="card">
+  <div class="card" id="inbox">
+    <div class="row">
+      <h2 style="margin:0">Inbox from kakeibo</h2>
+      <span id="inboxCount" class="muted">Loading…</span>
+      <button id="reviewNext" disabled>Review next</button>
+    </div>
+    <p id="syncInfo" class="muted" style="margin:8px 0 0"></p>
+  </div>
+
+  <div class="grid" id="review" hidden>
+    <div class="card"><img id="reviewImg" alt="Receipt photo"></div>
+    <div class="card">
+      <section>
+        <h2>Compare</h2>
+        <p class="muted" style="margin:0 0 8px">Label is what you saved in kakeibo. Red cells do not agree with the label: check them on the photo.</p>
+        <table id="compare"></table>
+      </section>
+      <section><h2>Items</h2><table id="itemCompare"></table><p id="extra" class="muted"></p></section>
+      <section>
+        <h2>Label</h2>
+        <p class="muted" style="margin:0 0 8px">Make the JSON match the receipt exactly. Then accept it: it goes to training-images/ and eval.py uses it.</p>
+        <textarea id="reviewLabel" spellcheck="false"></textarea>
+        <div class="row actions">
+          <button id="accept">Accept</button>
+          <button id="useQwen" class="secondary">Use the model's reading</button>
+          <button id="runQwen" class="secondary">Run the model</button>
+          <button id="discard" class="danger">Discard</button>
+          <span id="reviewStatus" class="muted"></span>
+        </div>
+        <p id="reviewError" style="color:var(--bad)"></p>
+      </section>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
     <div id="drop">Drop a receipt image here, or click to choose one.</div>
     <input id="file" type="file" accept="image/*" hidden>
     <div class="row">
@@ -62,6 +105,13 @@
       <section><h2>Receipt</h2><div id="summary"></div></section>
       <section><h2>Checks</h2><table id="checks"></table></section>
       <section><h2>Suggestions</h2><ul id="suggestions"></ul></section>
+      <section>
+        <h2>Correct and save</h2>
+        <p class="muted" style="margin:0 0 8px">Fix the JSON so it matches the receipt exactly, then save it. Saved receipts go to training-images/ and eval.py measures the parser against them.</p>
+        <textarea id="label" spellcheck="false"></textarea>
+        <div class="row"><button id="save">Save as correct</button><span id="saveStatus" class="muted"></span></div>
+        <p id="saveError"></p>
+      </section>
       <section><h2>kakeibo Expense JSON</h2><pre id="json"></pre></section>
     </div>
   </div>
@@ -117,7 +167,180 @@ function render({ model, seconds, receipt: r, expense, assessment: a }) {
   $('checks').innerHTML = a.checks.map((c) => `<tr><td class="${c.ok ? 'ok' : 'bad'}">${c.ok ? '✓' : '✗'}</td><td>${esc(c.name)}<div class="muted">${esc(c.detail)}</div></td></tr>`).join('');
   $('suggestions').innerHTML = a.suggestions.length ? a.suggestions.map((s) => `<li>${esc(s)}</li>`).join('') : '<li class="muted">No problems found.</li>';
   $('json').textContent = JSON.stringify(expense, null, 2);
+  $('label').value = JSON.stringify(r, null, 2);
+  $('saveStatus').textContent = ''; $('saveError').textContent = '';
 }
+
+const base64 = (f) => new Promise((ok, fail) => {
+  const rd = new FileReader();
+  rd.onload = () => ok(rd.result.split(',')[1]);
+  rd.onerror = fail;
+  rd.readAsDataURL(f);
+});
+
+// ── Inbox: receipts from kakeibo ─────────────────────────────────────────
+let current = null;
+const STALE_HOURS = 48;
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error);
+  return data;
+}
+
+async function loadInbox() {
+  try {
+    const d = await api('/inbox');
+    $('inboxCount').textContent = `${d.ids.length} receipt${d.ids.length === 1 ? '' : 's'} waiting · ${d.labeled} labeled`;
+    $('reviewNext').disabled = !d.ids.length;
+    $('reviewNext').dataset.next = d.ids[0] || '';
+    const info = $('syncInfo');
+    if (!d.lastSync) {
+      info.textContent = 'No sync yet. Run: python sync.py';
+      info.className = 'muted';
+    } else {
+      const hours = (Date.now() - new Date(d.lastSync.time)) / 3600000;
+      const ago = hours < 1 ? 'less than 1 hour ago' : hours < 48 ? `${Math.round(hours)} hours ago` : `${Math.round(hours / 24)} days ago`;
+      const bad = !d.lastSync.ok || hours > STALE_HOURS;
+      info.textContent = `Last sync: ${ago}${d.lastSync.ok ? '' : ' (failed)'}. ` +
+        (d.lastSync.ok ? (hours > STALE_HOURS ? 'Is the daily job running? Check logs/sync.log.' : '') : d.lastSync.line);
+      info.className = bad ? 'bad' : 'muted';
+    }
+    return d;
+  } catch (e) {
+    $('inboxCount').textContent = 'Could not read the inbox: ' + e.message;
+  }
+}
+
+const norm = (s) => String(s ?? '').normalize('NFKC').replace(/[\s　]/g, '').toLowerCase();
+const sum = (r) => r ? r.items.reduce((s, i) => s + i.price, 0) + r.charges.reduce((s, c) => s + c.amount, 0) : null;
+
+function renderCompare() {
+  const { label, qwen, prod } = current;
+  const p = prod && prod.receipt;
+  const rows = [
+    ['Store', (r) => r?.store, (a, b) => norm(a) === norm(b)],
+    ['Date', (r) => r?.date],
+    ['Total', (r) => r?.total, null, yen],
+    ['Category', (r) => r?.categoryId],
+    ['Items', (r) => r?.items.length],
+    ['Items + charges', sum, null, yen],
+  ];
+  const cell = (r, get, same, fmt) => {
+    if (!r) return '<td class="src muted">—</td>';
+    const v = get(r), want = get(label);
+    const ok = same ? same(v, want) : v === want;
+    return `<td class="src ${r === label || ok ? '' : 'bad'}">${esc(fmt ? fmt(v) : v ?? '—')}</td>`;
+  };
+  $('compare').innerHTML = `<tr><th></th><th class="src">Label</th><th class="src">Model (${esc(current.model)})</th><th class="src">kakeibo scan${prod ? ` (${esc(prod.engine)})` : ''}</th></tr>` +
+    rows.map(([name, get, same, fmt]) => `<tr><td>${name}</td>${cell(label, get, same, fmt)}${cell(qwen, get, same, fmt)}${cell(p, get, same, fmt)}</tr>`).join('');
+
+  // An item matches when the price is the same (like eval.py). Each item is used once.
+  const unmatched = (r) => r ? [...r.items] : null;
+  const leftQ = unmatched(qwen), leftP = unmatched(p);
+  const take = (left, item) => {
+    if (!left) return '<td class="mark muted">—</td>';
+    const i = left.findIndex((x) => x.price === item.price);
+    if (i < 0) return '<td class="mark bad">✗</td>';
+    const same = norm(left[i].name) === norm(item.name);
+    const html = `<td class="mark ${same ? 'ok' : ''}" title="${esc(left[i].name)}">${same ? '✓' : '≈'}</td>`;
+    left.splice(i, 1);
+    return html;
+  };
+  $('itemCompare').innerHTML = '<tr><th>Label item</th><th class="num">Price</th><th class="mark">Model</th><th class="mark">kakeibo</th></tr>' +
+    label.items.map((i) => `<tr><td>${esc(i.name)}${i.qty ? ` <span class="muted">× ${i.qty}${i.unit && i.unit !== 'pc' ? i.unit : ''}</span>` : ''}</td><td class="num">${yen(i.price)}</td>${take(leftQ, i)}${take(leftP, i)}</tr>`).join('');
+  const extra = (name, left) => left && left.length ? `<div>Only in ${name}: ${left.map((i) => `${esc(i.name)} ${yen(i.price)}`).join(', ')}</div>` : '';
+  $('extra').innerHTML = extra('the model', leftQ) + extra('the kakeibo scan', leftP) +
+    '<div>✓ same name and price · ≈ same price, other name (hover to see it) · ✗ missing</div>';
+  $('useQwen').disabled = !qwen;
+  $('runQwen').textContent = qwen ? 'Run the model again' : 'Run the model';
+}
+
+async function openReview(id) {
+  $('reviewError').textContent = ''; $('reviewStatus').textContent = 'Loading…';
+  try {
+    current = await api('/inbox/' + id);
+    $('review').hidden = false;
+    $('reviewImg').src = 'data:image/jpeg;base64,' + current.image;
+    $('reviewLabel').value = JSON.stringify(current.label, null, 2);
+    renderCompare();
+    $('reviewStatus').textContent = current.qwen ? '' : 'The model did not read this receipt yet.';
+    $('review').scrollIntoView({ behavior: 'smooth' });
+  } catch (e) {
+    $('reviewError').textContent = e.message; $('reviewStatus').textContent = '';
+  }
+}
+
+async function next() {
+  const d = await loadInbox();
+  if (d && d.ids.length) openReview(d.ids[0]);
+  else { $('review').hidden = true; current = null; }
+}
+
+$('reviewNext').onclick = () => openReview($('reviewNext').dataset.next);
+
+$('runQwen').onclick = async () => {
+  $('runQwen').disabled = true; $('reviewError').textContent = '';
+  const t0 = Date.now();
+  const timer = setInterval(() => $('reviewStatus').textContent = `Reading… ${Math.round((Date.now() - t0) / 1000)} s`, 500);
+  try {
+    const d = await api(`/inbox/${current.id}/parse`, {});
+    current.qwen = d.receipt; renderCompare();
+    $('reviewStatus').textContent = `Read in ${d.seconds} s.`;
+  } catch (e) {
+    $('reviewError').textContent = e.message; $('reviewStatus').textContent = '';
+  } finally {
+    clearInterval(timer); $('runQwen').disabled = false;
+  }
+};
+
+$('useQwen').onclick = () => {
+  if (current?.qwen && confirm("Replace the label with the model's reading? Check every line after this.")) {
+    $('reviewLabel').value = JSON.stringify(current.qwen, null, 2);
+  }
+};
+
+$('accept').onclick = async () => {
+  $('reviewError').textContent = '';
+  let receipt;
+  try { receipt = JSON.parse($('reviewLabel').value); } catch (e) { $('reviewError').textContent = 'The JSON is not valid: ' + e.message; return; }
+  $('accept').disabled = true;
+  try {
+    const d = await api(`/inbox/${current.id}/accept`, { receipt });
+    $('reviewStatus').textContent = `Saved ${d.saved}.`;
+    await next();
+  } catch (e) {
+    $('reviewError').textContent = e.message;
+  } finally {
+    $('accept').disabled = false;
+  }
+};
+
+$('discard').onclick = async () => {
+  if (!confirm('Discard this receipt? It is not used for eval or training.')) return;
+  try { await api(`/inbox/${current.id}/discard`, {}); await next(); } catch (e) { $('reviewError').textContent = e.message; }
+};
+
+loadInbox();
+
+$('save').onclick = async () => {
+  $('saveError').textContent = ''; $('saveStatus').textContent = '';
+  let receipt;
+  try { receipt = JSON.parse($('label').value); } catch (e) { $('saveError').textContent = 'The JSON is not valid: ' + e.message; return; }
+  $('save').disabled = true;
+  try {
+    const res = await fetch('/save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ receipt, image: await base64(file), type: file.type, filename: file.name }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    $('saveStatus').textContent = `Saved ${data.saved}. ${data.labeled} labeled receipts.`;
+  } catch (e) {
+    $('saveError').textContent = e.message;
+  } finally {
+    $('save').disabled = false;
+  }
+};
 </script>
 </body>
 </html>
