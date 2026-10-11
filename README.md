@@ -58,7 +58,7 @@ The same page reviews the receipts that come from kakeibo. See [Review](#review)
 
 The model does not learn from use. Use this loop to make the parser better and to prove each change.
 
-1. Get labeled receipts. A labeled receipt is an image and a `.json` file with the correct answer, in `training-images/` (gitignored). There are two ways to get them:
+1. Get labeled receipts. A labeled receipt is an image and a `.json` file with the correct answer, in `labels/` (gitignored). There are two ways to get them:
    - **From kakeibo (automatic):** see [Learn from kakeibo scans](#learn-from-kakeibo-scans).
    - **By hand:** parse a receipt in the web UI. Fix the JSON in **Correct and save** so it matches the receipt exactly. Then click **Save as correct**.
 2. Measure the parser:
@@ -87,13 +87,15 @@ Milestones:
 - About 30 labeled receipts: the comparison of the model with kakeibo's scanner starts to mean something.
 - 150–300 labeled receipts: you can fine-tune a LoRA adapter for Qwen2.5-VL on the dev split, on your Mac. Training is a manual step that runs for hours. Start it in the evening or on a weekend. The daily sync job never trains.
 
+Planned work, including quick fixes and a plan to distill a model that you own, is in [TODO.md](TODO.md).
+
 ## Learn from kakeibo scans
 
 [kakeibo](https://github.com/hafizulrifkihawari/kakeibo) can keep the photo of each receipt that you scan. This tool downloads those photos with the expense that you saved. You review each one, and it becomes a labeled receipt.
 
 ```
 phone: scan in kakeibo, fix, save ──► kakeibo D1: receipt_scans (photo + first reading)
-Mac:   sync.py ──► training-images/inbox/ ──► review in the web UI ──► training-images/ ──► eval.py
+Mac:   sync.py ──► labels/inbox/ ──► review in the web UI ──► labels/ ──► eval.py
 ```
 
 It is free. The photo waits in kakeibo's D1 database only until the next sync, which deletes it there. The model runs on your Mac.
@@ -122,7 +124,7 @@ Set these in the environment or in a `.env` file in this folder (gitignored):
 .venv/bin/python sync.py --predict    # download, then let the model read each new photo
 ```
 
-For each scan, `sync.py` writes three files to `training-images/inbox/`: the photo, the expense you saved (`<id>.json`), and kakeibo's first reading (`<id>.prod.json`). Then it deletes the scan in kakeibo. It skips a scan whose expense is not saved yet (it waits in the phone's offline queue). It deletes a scan whose expense you deleted. `--keep` keeps the scans in kakeibo. `--local` uses kakeibo's local development database.
+For each scan, `sync.py` writes three files to `labels/inbox/`: the photo, the expense you saved (`<id>.json`), and kakeibo's first reading (`<id>.prod.json`). Then it deletes the scan in kakeibo. It skips a scan whose expense is not saved yet (it waits in the phone's offline queue). It deletes a scan whose expense you deleted. `--keep` keeps the scans in kakeibo. `--local` uses kakeibo's local development database.
 
 ### Daily job
 
@@ -156,7 +158,7 @@ The **Inbox from kakeibo** card shows how many receipts wait and when the last s
 - The photo is on the left. On the right, a table compares the label (the expense you saved), the model's reading, and kakeibo's first reading. A red cell does not agree with the label: check it on the photo.
 - The item table marks each label item: ✓ the same name and price, ≈ the same price and another name, ✗ missing. Items that only the model or kakeibo found are listed below it.
 - Fix the label JSON. **Use the model's reading** copies the model's answer into the label as a start. **Run the model** reads the photo now, if the daily job did not.
-- **Accept** saves the label to `training-images/<id>.json` and keeps kakeibo's first reading in `training-images/prod/` for `--baseline prod`. **Discard** removes a bad photo.
+- **Accept** saves the label to `labels/<id>.json` and keeps kakeibo's first reading in `labels/prod/` for `--baseline prod`. **Discard** removes a bad photo.
 
 You often fix only the total and the category in kakeibo. So check every item name and price before you accept.
 
@@ -175,4 +177,4 @@ The **Labeled receipts** card lists every saved label with its date, store, tota
 
 ### Privacy
 
-`training-images/`, `.cache/`, `runs/`, and `logs/` hold photos and data of your purchases. They are gitignored. Never commit them.
+`labels/`, `.cache/`, `runs/`, and `logs/` hold photos and data of your purchases. They are gitignored. Never commit them.

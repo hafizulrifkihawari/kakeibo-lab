@@ -1,4 +1,4 @@
-"""Download receipts scanned in kakeibo into training-images/inbox/, for review in the web UI.
+"""Download receipts scanned in kakeibo into labels/inbox/, for review in the web UI.
 
 kakeibo keeps each scanned photo in its receipt_scans table when scan collection is on for the
 user (kakeibo README: "Collect scans for a local model"). This script reads them through wrangler,
@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import List, Optional, get_args
 
 ROOT = Path(__file__).resolve().parent
-LABELS = ROOT / "training-images"
+LABELS = ROOT / "labels"
 INBOX = LABELS / "inbox"
 LOGS = ROOT / "logs"
 SYNC_LOG = LOGS / "sync.log"

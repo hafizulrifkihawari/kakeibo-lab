@@ -26,7 +26,7 @@ from sync import INBOX, last_sync
 PORT = int(os.environ.get("PORT", "8000"))
 INDEX = Path(__file__).with_name("static") / "index.html"
 MAX_BYTES = 20 * 1024 * 1024
-LABELS = Path(__file__).with_name("training-images")
+LABELS = Path(__file__).with_name("labels")
 IMAGE_EXTS = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/heic": ".heic"}
 IMAGE_TYPES = {ext: mime for mime, ext in IMAGE_EXTS.items()} | {".jpeg": "image/jpeg"}
 # The first reading of kakeibo's own scanner, for eval.py --baseline prod.
@@ -235,7 +235,7 @@ class Handler(BaseHTTPRequestHandler):
         self._parse_image(image)
 
     def _inbox_accept(self, sid):
-        """The reviewed label becomes a gold label: training-images/<id>.jpg + .json."""
+        """The reviewed label becomes a gold label: labels/<id>.jpg + .json."""
         image, _, prod = inbox_files(sid)
         if not image.exists():
             self._json(404, {"error": "This receipt is not in the inbox."})
@@ -259,7 +259,7 @@ class Handler(BaseHTTPRequestHandler):
         for path in inbox_files(sid):
             path.unlink(missing_ok=True)
 
-    # ── Saved labels (training-images/) ─────────────────────────────────────
+    # ── Saved labels (labels/) ─────────────────────────────────────
 
     def _labels_list(self):
         rows = []

@@ -37,7 +37,8 @@ japanese_expenses.csv
 .vscode/
 .idea/
 
-# Receipt photos (personal data)
+# Receipt photos and labels (personal data). training-images/ is the old name.
+labels/
 training-images/
 
 # Model answer cache, eval run history, and sync logs (personal data)

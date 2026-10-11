@@ -1,13 +1,13 @@
 """Measure the parser against hand-checked receipts.
 
 A labeled receipt is an image with a .json file of the same name next to it
-(training-images/PXL_1.jpg + training-images/PXL_1.json). Save labels from the web UI.
+(labels/PXL_1.jpg + labels/PXL_1.json). Save labels from the web UI.
 
 Each receipt is in the dev split or the test split (1 in 5), fixed by its file name.
 Tune on dev. Before you keep a change, check that test does not go down.
 
 Run: .venv/bin/python eval.py [DIR] [--split dev|test|all] [--baseline prod] [--out results.json]
-  --baseline prod   score kakeibo's own scan (training-images/prod/) instead of the model
+  --baseline prod   score kakeibo's own scan (labels/prod/) instead of the model
 
 Every run is saved in runs/ and compared with the last run of the same kind.
 The model's raw answers are cached in .cache/, so a change to clean() or fix() runs fast.
@@ -171,7 +171,7 @@ def compare_runs(run: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("dir", nargs="?", default="training-images")
+    ap.add_argument("dir", nargs="?", default="labels")
     ap.add_argument("--split", choices=["dev", "test", "all"], default="dev")
     ap.add_argument("--baseline", choices=["prod"], help="score kakeibo's own scan instead of the model")
     ap.add_argument("--out", help="Write the full results to this JSON file")

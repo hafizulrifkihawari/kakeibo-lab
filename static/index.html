@@ -156,7 +156,7 @@
       <section><h2>Suggestions</h2><ul id="suggestions"></ul></section>
       <section>
         <h2>Correct and save</h2>
-        <p class="muted" style="margin:0 0 4px">Make each field match the receipt, then save it. Saved receipts go to training-images/ and eval.py measures the parser against them.</p>
+        <p class="muted" style="margin:0 0 4px">Make each field match the receipt, then save it. Saved receipts go to labels/ and eval.py measures the parser against them.</p>
         <div id="labelEditor"></div>
         <div class="row"><button id="save">Save as correct</button><span id="saveStatus" class="muted"></span></div>
         <div id="saveError" class="error"></div>
@@ -547,7 +547,7 @@ async function openReview(id, mode = 'inbox') {
     current = await api((mode === 'label' ? '/labels/' : '/inbox/') + encodeURIComponent(id));
     current.mode = mode;
     $('reviewTitle').textContent = mode === 'label'
-      ? `Saved label ${id} · changes overwrite training-images/${id}.json`
+      ? `Saved label ${id} · changes overwrite labels/${id}.json`
       : `Inbox receipt ${id} · from kakeibo`;
     $('accept').textContent = mode === 'label' ? 'Save changes' : 'Accept';
     $('discard').textContent = mode === 'label' ? 'Delete label' : 'Discard';
