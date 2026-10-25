@@ -115,7 +115,8 @@ class Kakeibo:
         except subprocess.TimeoutExpired:
             raise SyncError("wrangler did not answer in 5 minutes.")
         if done.returncode != 0:
-            detail = (done.stderr.strip() or done.stdout.strip()).splitlines()
+            lines = (done.stderr.strip() or done.stdout.strip()).splitlines()
+            detail = [line for line in lines if not line.startswith("npm notice")] or lines
             raise SyncError("wrangler failed: " + " | ".join(detail[-3:]))
         return done.stdout
 
