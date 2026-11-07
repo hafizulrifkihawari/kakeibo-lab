@@ -158,7 +158,7 @@ The **Inbox from kakeibo** card shows how many receipts wait and when the last s
 - The photo is on the left. On the right, a table compares the label (the expense you saved), the model's reading, and kakeibo's first reading. A red cell does not agree with the label: check it on the photo.
 - The item table marks each label item: ✓ the same name and price, ≈ the same price and another name, ✗ missing. Items that only the model or kakeibo found are listed below it.
 - Fix the label JSON. **Use the model's reading** copies the model's answer into the label as a start. **Run the model** reads the photo now, if the daily job did not.
-- **Accept** saves the label to `labels/<id>.json` and keeps kakeibo's first reading in `labels/prod/` for `--baseline prod`. **Discard** removes a bad photo.
+- **Accept** saves the label to `labels/<id>.json` and keeps kakeibo's first reading in `labels/prod/` for `--baseline prod`. **Discard** removes a bad photo and records it in `labels/discarded/`, so a later sync does not download it again.
 
 You often fix only the total and the category in kakeibo. So check every item name and price before you accept.
 

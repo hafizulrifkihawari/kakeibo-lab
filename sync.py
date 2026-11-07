@@ -31,6 +31,8 @@ from typing import List, Optional, get_args
 ROOT = Path(__file__).resolve().parent
 LABELS = ROOT / "labels"
 INBOX = LABELS / "inbox"
+# One empty file per discarded receipt, so a later sync does not download it again.
+DISCARDED = LABELS / "discarded"
 LOGS = ROOT / "logs"
 SYNC_LOG = LOGS / "sync.log"
 JOB = "com.kakeibo-lab.sync"
@@ -203,7 +205,9 @@ def sync(db: Kakeibo, dry_run: bool, keep: bool) -> dict:
             counts["dropped"] += 1
             print(f"drop: {sid}: the expense was deleted")
             continue
-        if not (LABELS / f"{sid}.json").exists() and not download(db, sid, scan["engine"]):  # Not reviewed before.
+        if (DISCARDED / sid).exists():
+            pass  # Discarded in the review: only remove the copy in kakeibo.
+        elif not (LABELS / f"{sid}.json").exists() and not download(db, sid, scan["engine"]):  # Not reviewed before.
             continue  # Deleted while this run was busy: the next run drops it.
         if not keep:
             db.query(f"DELETE FROM receipt_scans WHERE expense_id = '{sid}'")
@@ -225,12 +229,14 @@ def download(db: Kakeibo, sid: str, engine: str) -> bool:
     row = rows[0]
     label = to_label(expenses[0], items, charges)
     INBOX.mkdir(parents=True, exist_ok=True)
-    _write(INBOX / f"{sid}.jpg", base64.b64decode(row["image"]))
+    # The inbox lists receipts by their .jpg, so write it last: a stopped run leaves no receipt
+    # without its label.
     _write(INBOX / f"{sid}.prod.json", json.dumps(
         {"engine": engine, "scanned_at": row["created_at"], "receipt": json.loads(row["draft"])},
         ensure_ascii=False, indent=2).encode())
     _write(INBOX / f"{sid}.json", json.dumps(label.model_dump(exclude_none=True), ensure_ascii=False,
                                              indent=2).encode())
+    _write(INBOX / f"{sid}.jpg", base64.b64decode(row["image"]))
     return True
 
 

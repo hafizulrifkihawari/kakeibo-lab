@@ -541,10 +541,18 @@ function showSources() {
 // The review form shows an inbox receipt (mode 'inbox') or a saved label (mode 'label').
 const base = () => (current.mode === 'label' ? '/labels/' : '/inbox/') + encodeURIComponent(current.id);
 
+// The number of the newest openReview call. An older call that ends later changes nothing.
+let opening = 0;
+const reviewButtons = () => ['accept', 'discard', 'runQwen', 'useQwen'].map($);
+
 async function openReview(id, mode = 'inbox') {
+  const call = ++opening;
   $('reviewError').textContent = ''; $('reviewStatus').textContent = 'Loading…';
+  reviewButtons().forEach((b) => (b.disabled = true));
   try {
-    current = await api((mode === 'label' ? '/labels/' : '/inbox/') + encodeURIComponent(id));
+    const item = await api((mode === 'label' ? '/labels/' : '/inbox/') + encodeURIComponent(id));
+    if (call !== opening) return;
+    current = item;
     current.mode = mode;
     $('reviewTitle').textContent = mode === 'label'
       ? `Saved label ${id} · changes overwrite labels/${id}.json`
@@ -560,7 +568,13 @@ async function openReview(id, mode = 'inbox') {
     $('reviewStatus').textContent = current.qwen ? '' : 'The model did not read this receipt yet.';
     $('review').scrollIntoView({ behavior: 'smooth' });
   } catch (e) {
+    if (call !== opening) return;
     $('reviewError').textContent = e.message; $('reviewStatus').textContent = '';
+  } finally {
+    if (call === opening) {
+      ['accept', 'discard', 'runQwen'].forEach((b) => ($(b).disabled = false));
+      $('useQwen').disabled = !current?.qwen;
+    }
   }
 }
 
@@ -574,18 +588,25 @@ $('reviewNext').onclick = () => openReview($('reviewNext').dataset.next);
 $('reviewImg').onclick = () => $('reviewImg').classList.toggle('zoom');
 
 $('runQwen').onclick = async () => {
+  // The user can open another receipt while the model reads. Keep the reading with its receipt.
+  const target = current;
+  const shown = () => current === target;
   $('runQwen').disabled = true; $('reviewError').textContent = '';
   const t0 = Date.now();
-  const timer = setInterval(() => $('reviewStatus').textContent = `Reading… ${Math.round((Date.now() - t0) / 1000)} s`, 500);
+  const timer = setInterval(() => {
+    if (shown()) $('reviewStatus').textContent = `Reading… ${Math.round((Date.now() - t0) / 1000)} s`;
+  }, 500);
   try {
     const d = await api(`${base()}/parse`, {});
-    current.qwen = d.receipt;
+    target.qwen = d.receipt;
+    if (!shown()) return;
     showSources();
     $('reviewStatus').textContent = `Read in ${d.seconds} s.`;
   } catch (e) {
-    $('reviewError').textContent = e.message; $('reviewStatus').textContent = '';
+    if (shown()) { $('reviewError').textContent = e.message; $('reviewStatus').textContent = ''; }
   } finally {
-    clearInterval(timer); $('runQwen').disabled = false;
+    clearInterval(timer);
+    if (shown()) $('runQwen').disabled = false;
   }
 };
 

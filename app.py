@@ -21,7 +21,7 @@ from assess import assess
 from ocr_engine import (MODEL, CategoryId, ChargeKind, ItemKind, ParsedReceipt, cached_raw, check_total,
                         parse_receipt, postprocess, to_expense)
 from eval import labeled, split_of
-from sync import INBOX, last_sync
+from sync import DISCARDED, INBOX, last_sync
 
 PORT = int(os.environ.get("PORT", "8000"))
 INDEX = Path(__file__).with_name("static") / "index.html"
@@ -251,6 +251,8 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"saved": str(label.relative_to(LABELS.parent)), "labeled": labeled_count()})
 
     def _inbox_discard(self, sid):
+        DISCARDED.mkdir(parents=True, exist_ok=True)
+        (DISCARDED / sid).touch()
         self._remove_from_inbox(sid)
         self._json(200, {"discarded": sid})
 
